@@ -1,60 +1,152 @@
 #!/bin/bash
 # -*- coding: utf-8 -*-
-# Author: Pär Andersson (National Supercomputer Centre, Sweden)
-# Version: 0.3 2007-07-30
-#
-# 2011-06-23: Joerg Bornschein <bornschein@fias.uni-frankfurt.de>
-#   Make this script find its own path
+# Authors: Pär Andersson (National Supercomputer Centre, Sweden)
+#          Paul Mezzanini (Rochester Institute of Technology, USA)
+#          Josh McSavaney (Rochester Institute of Technology, USA)
 #
 # This will submit a batch script that starts screen on a node.
 # Then ssh is used to connect to the node and attach the screen.
 # The result is very similar to an interactive shell in PBS
 # (qsub -I)
 
-# Find our own path (linux specific)
-MYDIR="$( cd "$( dirname "$0" )" && pwd )"
+set -e
 
-# or
-#MYDIR=/usr/local/bin
+function TPUT()
+{
+    #check for TTY and tput and redefine our existence based upon the results
+    if [[ -t 1 && -t 2 ]] && command -v "tput" >& /dev/null ; then
+        function TPUT()
+        {
+            tput "$@"
+        }
+    else
+        function TPUT() { : ; }
+    fi
+
+    #now call thy self
+    TPUT "$@"
+}
+
+function ERROR()
+{
+    TPUT setaf 1 >&2
+    while read; do
+        echo "ERROR: $REPLY"
+    done <<< "$@" >&2
+    TPUT sgr0 >&2
+}
+
+function WARN()
+{
+    TPUT setaf 3
+    while read; do
+        echo "WARN: $REPLY"
+    done <<< "$@"
+    TPUT sgr0
+}
+
+function INFO()
+{
+    TPUT setaf 2
+    while read; do
+        echo "INFO: $REPLY"
+    done <<< "$@"
+    TPUT sgr0
+}
+
+export MYDIR="$( dirname "$( readlink -f "${BASH_SOURCE[0]}" )" )"
 
 # Batch Script that starts SCREEN
-BS=$MYDIR/_interactive
+BS="${MYDIR}/_interactive"
 # Interactive screen script
-IS=$MYDIR/_interactive_screen
+IS="${MYDIR}/_interactive_screen"
 
+INFO ">Please enter your resource requirements.<"
+echo " "
+read -e -p "How many CPU cores? :: " -i "2" REQCPU
+read -e -p "How much memory (in MB)? :: " -i "4096" REQMEM
+read -e -p "How many minutes do you need? :: " -i "120" REQTIME
+read -e -p "What QOS? :: " -i "free" QOS
+read -e -p "What partition? :: " -i "work" PARTITION
+
+echo " "
+
+WARN "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+WARN "!! If you detach from the sinteractive  !!"
+WARN "!! screen session, it _WILL_ be killed. !!"
+WARN "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+echo " "
+INFO "Spawning job with the following resources:"
+INFO "     Processors: ${REQCPU}"
+INFO "         Memory: ${REQMEM} MB"
+INFO "  Runtime limit: ${REQTIME} minutes"
+INFO "            QOS: ${QOS}"
+INFO "      Partition: ${PARTITION}"
+
+echo " "
+
+INFO "Submitting job..."
 # Submit the job and get the job id
-JOB=`sbatch --output=/dev/null --error=/dev/null $@ $BS 2>&1 \
-    | egrep -o -e "\b[0-9]+$"`
+if ! JOB="$( sbatch --cpus-per-task="${REQCPU}" --mem="${REQMEM}" \
+    --time="${REQTIME}" --qos="${QOS}" --partition="${PARTITION}"\
+    --output=/dev/null --error=/dev/null --export MYDIR "$@" "${BS}" \
+    |& egrep -o -e "\b[0-9]+$" )"; then
+
+    ERROR "Failed to create job. Please double-check all settings are valid."
+    exit 1
+fi
 
 # Make sure the job is always canceled
 # Relying on $PATH for scancel
-trap "{ scancel -q $JOB; exit; }" SIGINT SIGTERM EXIT
+trap "{ echo 'Exit triggered. Cancelling job.' >&2 ; \
+    scancel --quiet "${JOB}"; exit ; }" EXIT
 
-echo "Waiting for JOBID $JOB to start"
-while true;do
+sleep 1
+
+# See if everything exploded immediately
+if scontrol show job "$JOB" 2>/dev/null | grep -q "JobState=FAILED"; then
+    ERROR "Looks like sinteractive is broken. Contact an administrator."
+    exit 1
+fi
+
+TIMEOUT="60"
+INFO "Waiting for JOBID ${JOB} to start"
+while : ; do
     sleep 1s
 
     # Check job status
-    STATUS=`squeue -j $JOB -t PD,R -h -o %t`
+    STATUS="$( squeue -j "${JOB}" -t PD,R -h -o %t )"
 
-    if [ "$STATUS" = "R" ];then
-	# Job is running, break the while loop
-	break
-    elif [ "$STATUS" != "PD" ];then
-	echo "Job is not Running or Pending. Aborting"
-	scancel $JOB
-	exit 1
+    if [[ "${STATUS}" = "R" ]]; then
+        # Job is running, break the while loop
+        break
     fi
 
-    echo -n "."
+    if [[ "$TIMEOUT" -le 0 ]]; then
+        # Let the trap sort 'em out
+        echo
+        INFO "Waiting for job start timed out."
+        INFO "This is probably just a sign the cluster is real busy."
+        INFO "Please try again later."
+        exit 1
+    fi
 
+    ((TIMEOUT--))
+
+    echo -n "."
 done
 
 # Determine the first node in the job:
-NODE=`srun --jobid=$JOB -N1 hostname`
+NODE="$( srun --jobid="${JOB}" -N1 hostname )"
 
 # SSH to the node and attach the screen
-sleep 1s
-ssh -X -t $NODE $IS slurm$JOB
-# The trap will now cancel the job before exiting.
 
+sleep 1s
+
+# sacrific security for user experience
+ssh -X -o StrictHostKeyChecking=no -c arcfour -C \
+    -t "${NODE}" "${IS}" "slurm${JOB}"
+
+INFO "Wrapping up..."
+
+# The trap will now cancel the job before exiting.

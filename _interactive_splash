@@ -1,0 +1,39 @@
+#!/bin/bash
+
+tput setaf 2
+echo "Welcome to sinteractive!"
+tput sgr0
+
+cat <<"EOF"
+
+This is really just a fancy-dancy screen session.
+
+You'll find at the bottom of your terminal that there are multiple "tabs" open.
+These tabs, or regions, all exist within a single encompassing screen "session."
+One of these tabs is a BASH prompt and another is HTOP, so you can monitor the
+utilization of the system to which you were scheduled in real time.
+
+Please be sure to close out of sinteractive when you're done.
+
+Here are some useful screen commands.
+
+Key sequence    Result
+-------------------------------------------------------------------------------
+ctrl+a ?        Display screen's command list
+ctrl+a c        Create a new tab (with shell)
+ctrl+a k        Close the current tab
+ctrl+a n/p      Proceed to the next (n) or previous (p) tab
+ctrl+a <num>    Jump to tab <num>
+ctrl+a Esc      Scroll back through text in the tab (press 'q' to stop)
+ctrl+a d        Detach from the session (in our case, kill sinteractive)
+
+EOF
+tput setaf 1
+echo "WARNING: if you detach from this screen session, your job will be killed."
+tput setaf 2
+echo
+echo "To continue, close this region"
+tput sgr0
+
+trap '{ :; }' INT
+while : ; do dd &>/dev/null ; done

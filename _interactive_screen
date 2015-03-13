@@ -4,16 +4,14 @@
 # Version: 0.3 2007-07-30
 #
 
-SCREENSESSION=$1
+SCREENSESSION="$1"
 
 # If DISPLAY is set then set that in the screen, then create a new
 # window with that environment and kill the old one.
 if [ "$DISPLAY" != "" ];then
-    screen -S $SCREENSESSION -X unsetenv DISPLAY
-    screen -p0 -S $SCREENSESSION -X setenv DISPLAY $DISPLAY
-    screen -p0 -S $SCREENSESSION -X screen
-    screen -p0 -S $SCREENSESSION -X kill
+    screen -p2 -S "$SCREENSESSION" -X unsetenv DISPLAY
+    screen -p2 -S "$SCREENSESSION" -X setenv DISPLAY "$DISPLAY"
 fi
 
-exec screen -S $SCREENSESSION -rd
-
+screen -p2 -S "$SCREENSESSION" -X kill #META tab has outlived its usefulness
+exec screen -p1 -S "$SCREENSESSION" -rd

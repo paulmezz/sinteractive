@@ -4,6 +4,7 @@
 # Version: 0.2 2007-07-30
 #
 # Simple batch script that starts SCREEN.
+# MYDIR is passed in as an environment variable
 
-exec screen -Dm -S slurm$SLURM_JOB_ID
+exec screen -c "${MYDIR}"/sinteractive_screenrc.conf -Dm -S "slurm$SLURM_JOB_ID"
 
